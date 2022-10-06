@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <string>
-#include <cstring>
 #include <algorithm>
 #include <array>
 #include <functional>
@@ -27,6 +26,7 @@ const int MIN_SERVICE = 0x00;
 const int MAX_SERVICE = 0x3f;
 const int MIN_PID = 0x00;
 const int MAX_PID = 0xffff;
+const int MAX_STANDARD_PID = 0xff;
 
 const int VEHICLE_INFO_SERVICE = 0x09;
 const int SHOW_DATA_SERVICE = 0x01;
@@ -35,6 +35,8 @@ const int SHOW_FREEZE_FRAME_SERVICE = 0x02;
 enum fault_code_source:uint8_t {stored = 0x03 /* default */, pending = 0x07, permanent = 0x0a};
 
 using can_data = std::array<uint8_t, 8>;
+
+auto wait_override = RESPONSE_WAIT;
 
 
 void foreach_pid(uint32_t features, std::function<void(int)> callback)
@@ -48,14 +50,15 @@ void foreach_pid(uint32_t features, std::function<void(int)> callback)
     }
 }
 
-void do_until_expire(std::function<bool()> what, std::chrono::milliseconds wait = RESPONSE_WAIT)
+void do_until_expire(std::function<bool()> what)
 {
+    const std::chrono::milliseconds wait = wait_override;
     const auto expire = std::chrono::system_clock::now() + wait;
     bool abort = false;
     while(std::chrono::system_clock::now() < expire && !abort)
     {
         abort = what();
-    }    
+    }
 }
 
 
@@ -97,7 +100,7 @@ const std::vector<uint8_t> receive_multipart(CANDevice &can)
 
     bool more = true;
     bool first = false;
-    
+
     can_data buffer{};
 
     do_until_expire([&]() -> bool {
@@ -114,7 +117,7 @@ const std::vector<uint8_t> receive_multipart(CANDevice &can)
         {
             if (!first)
             {
-                memset(buffer.data(), 0x00, buffer.size());
+                std::fill(buffer.begin(), buffer.end(), 0x00);
                 buffer[0] = 0x30; // flow control, enable all remaining parts
                 can.data_send(id - 8, buffer);
                 first = true;
@@ -122,7 +125,7 @@ const std::vector<uint8_t> receive_multipart(CANDevice &can)
 
             return false;
         }
-        
+
         return true; // expire the loop
     });
 
@@ -132,7 +135,7 @@ const std::vector<uint8_t> receive_multipart(CANDevice &can)
 void read_info(CANDevice &can, int ecu = ANY_ECU)
 {
     can_data buffer{};
-    memset(buffer.data(), OBD_PAD_BYTE, buffer.size());
+    std::fill(buffer.begin(), buffer.end(), OBD_PAD_BYTE);
 
     // Generate ISO-15765 headers + OBD-II command
     buffer[1] = 0x09; // Service 9
@@ -187,7 +190,7 @@ void enumerate(CANDevice &can)
     can.filter(OBD_ECU_RECV_BASE, ~0x07);
 
     can_data buffer{};
-    memset(buffer.data(), OBD_PAD_BYTE, buffer.size());
+    std::fill(buffer.begin(), buffer.end(), OBD_PAD_BYTE);
 
     // Generate ISO-15765 headers + OBD-II command
     buffer[1] = 0x01; // Service 1
@@ -226,7 +229,7 @@ void enumerate(CANDevice &can)
         return;
     }
 
-    // Print the ECU repsonses and check for next page then collect the ECU available info
+    // Print the ECU responses and check for next page then collect the ECU available info
     for (int ecu = 0; ecu < MAX_ECUS; ecu++)
     {
         uint32_t features = ecu_features[ecu];
@@ -245,7 +248,7 @@ void enumerate(CANDevice &can)
                     << " (0x" << std::hex << send_id
                     << "/0x" << recv_id << std::dec
                     << ") :" << std::endl;
-        
+
         // Enumerate additional pages of read data service 0x01
         for (int page = 0; page < MAX_DATAS; page++)
         {
@@ -253,11 +256,11 @@ void enumerate(CANDevice &can)
 
             if (page > 0)
             {
-                // Send request to ECU for next page of avalable info
+                // Send request to ECU for next page of available info
                 features = 0;
 
                 buffer[2] = (uint8_t)offset; // Get supported PIDs (1-20) + 0x20 * page
-                
+
                 can.filter(recv_id);
                 can.data_send(send_id, buffer);
                 do_until_expire([&]() -> bool {
@@ -267,7 +270,7 @@ void enumerate(CANDevice &can)
                     if (can.data_receive(can_id, buffer))
                     {
                         features = buffer[3] << 24 | buffer[4] << 16 | buffer[5] << 8 | buffer[6];
-                        
+
                         return true;
                     }
 
@@ -282,9 +285,9 @@ void enumerate(CANDevice &can)
             }
 
 
-            printf("    Available data [%02X-%02X]: 0x%08x\n", 
+            printf("    Available data [%02X-%02X]: 0x%08x\n",
                     (offset + 1), // first feature
-                    (offset + FEATURE_PAGE_SIZE), //last feaure
+                    (offset + FEATURE_PAGE_SIZE), //last feature
                     features
             );
             std::cout << "    ";
@@ -306,7 +309,7 @@ void enumerate(CANDevice &can)
 void clear_dtc(CANDevice &can, int ecu = ANY_ECU)
 {
     can_data buffer{};
-    memset(buffer.data(), OBD_PAD_BYTE, buffer.size());
+    std::fill(buffer.begin(), buffer.end(), OBD_PAD_BYTE);
 
     // Generate ISO-15765 headers + OBD-II command
     buffer[1] = 0x04; // Service 4
@@ -328,7 +331,7 @@ void clear_dtc(CANDevice &can, int ecu = ANY_ECU)
 void read_dtc(CANDevice &can, int ecu = ANY_ECU, fault_code_source service = stored)
 {
     can_data buffer{};
-    memset(buffer.data(), OBD_PAD_BYTE, buffer.size());
+    std::fill(buffer.begin(), buffer.end(), OBD_PAD_BYTE);
 
     // Generate ISO-15765 headers + OBD-II command
     buffer[1] = service; // Service 3
@@ -345,7 +348,7 @@ void read_dtc(CANDevice &can, int ecu = ANY_ECU, fault_code_source service = sto
         can.filter(ecu + OBD_ECU_RECV_BASE);
         can.data_send(ecu + OBD_ECU_SEND_BASE, buffer);
     }
-    
+
     const std::vector<uint8_t> defragmented = receive_multipart(can);
 
     if (defragmented.empty() || (defragmented[0] & 0x3f) != service)
@@ -359,7 +362,7 @@ void read_dtc(CANDevice &can, int ecu = ANY_ECU, fault_code_source service = sto
     for (int i = 1; i < (int)defragmented.size() -1; i++)
     {
         const uint16_t dtc = defragmented[i] << 8 | defragmented[++i];
-        std::cout << decode_dtc(dtc) << std::endl; 
+        std::cout << decode_dtc(dtc) << std::endl;
     }
 }
 
@@ -367,23 +370,33 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
 {
     if (service < MIN_SERVICE || service > MAX_SERVICE)
     {
-        std::cerr << "Impossible service id" << std::endl;
+        std::cerr << "Impossible Service ID" << std::endl;
         return;
     }
 
     if (pid < MIN_PID || pid > MAX_PID)
     {
-        std::cerr << "Impossible pid" << std::endl;
+        std::cerr << "Impossible PID" << std::endl;
         return;
     }
 
     can_data buffer{};
+    std::fill(buffer.begin(), buffer.end(), OBD_PAD_BYTE);
 
     // Generate ISO-15765 headers + OBD-II command
     buffer[1] = (uint8_t)service;
-    buffer[2] = (uint8_t)(pid >> 8);
-    buffer[3] = (uint8_t)pid;
-    buffer[0] = 3;
+    if (pid > MAX_STANDARD_PID)
+    {
+        buffer[2] = (uint8_t)(pid >> 8);
+        buffer[3] = (uint8_t)pid;
+        buffer[0] = 3;
+    }
+    else
+    {
+        buffer[2] = (uint8_t)pid;
+        buffer[0] = 2;
+    }
+
 
     if (ecu < 0)
     {
@@ -405,9 +418,12 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
     }
 
     std::cout << "Results (";
-    printf("Service: %02x, PID: %02x, length: %i)\n", service, pid, defragmented.size() - 1);
+    printf("Service: %02x, PID: %02x, length: %i)\n", service, pid, defragmented.size() - ISO15765_DATA_OFFSET);
 
-    for (int i = 1; i < defragmented.size(); i++)
+    //defragmented[0] = pid | 0x40;
+    //defragmented[1] = service;
+
+    for (int i = ISO15765_DATA_OFFSET; i < defragmented.size(); i++)
     {
         printf("%02x", defragmented[i]);
     }
@@ -438,6 +454,7 @@ int main(int argc, const char* argv[])
         std::cout << "\t\t-e <ecu> - only request from this ECU, 0-8. Do not broadcast (0x7df)" << std::endl;
         std::cout << "\t\t-s <service> - service number, applies only to request command, hex number" << std::endl;
         std::cout << "\t\t-p <pid> - pid number, applies only to request command, hex number" << std::endl;
+        std::cout << "\t\t-t <seconds> - wait for timeout before stopping packet receive, default=1s" << std::endl;
 
         return 0;
     }
@@ -445,7 +462,7 @@ int main(int argc, const char* argv[])
     std::string cmd{argv[1]};
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
 
-    std::string interface = "vcan0";
+    std::string interface = "can0";
     int ecu = ANY_ECU;
     int service = -1;
     int pid = -1;
@@ -453,26 +470,32 @@ int main(int argc, const char* argv[])
     // Any further arguments
     for (int i = 2; i < argc; i++)
     {
-        if (std::string{argv[i]} == "-i")
+        const std::string arg{argv[i]};
+        if (arg == "-i")
         {
             interface = argv[++i];
         }
-        else if (std::string{argv[i]} == "-s")
+        else if (arg == "-s")
         {
-           service = std::stol(std::string{argv[++i]}, nullptr, 16);
+           service = std::stol(argv[++i], nullptr, 16);
         }
-        else if (std::string{argv[i]} == "-p")
+        else if (arg == "-p")
         {
-            pid = std::stol(std::string{argv[++i]}, nullptr, 16);
+            pid = std::stol(argv[++i], nullptr, 16);
         }
-        else if (std::string{argv[i]} == "-e")
+        else if (arg == "-e")
         {
-            ecu = std::stol(std::string{argv[++i]});
+            ecu = std::stol(argv[++i]);
             if (ecu >= MAX_ECUS)
             {
                 std::cerr << "Warning: impossible ECU number, using broadcast" << std::endl;
                 ecu = ANY_ECU;
             }
+        }
+        else if (arg == "-t")
+        {
+            const int sec = std::stol(argv[++i]);
+            wait_override = std::chrono::seconds(sec);
         }
     }
 
@@ -522,6 +545,10 @@ int main(int argc, const char* argv[])
     else if (cmd == "request" || cmd == "read")
     {
         request(can, service, pid, ecu);
+    }
+    else
+    {
+        std::cerr << "Unknown command" << std::endl;
     }
 
     return 0;

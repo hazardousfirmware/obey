@@ -7,6 +7,7 @@
 
 static const int MAX_LENGTH = 4095;
 enum header_type:uint8_t {single, first, consecutive, flow};
+static const int ISO15765_DATA_OFFSET = 2; //TODO: defragmented[2] = 0x01 is sometimes not present, determine why
 
 class ISO15765Decoder
 {
@@ -19,8 +20,9 @@ class ISO15765Decoder
 
     private:
         std::array<uint8_t, MAX_LENGTH> defragmented;
-        int length;
-        int index;
+        int length; // expected total length
+        int index; // offset in buffer
+        int last; // Last sequence
 };
 
 #endif //__ISO15765_H
