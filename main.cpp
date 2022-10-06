@@ -27,6 +27,7 @@ const int MAX_SERVICE = 0x3f;
 const int MIN_PID = 0x00;
 const int MAX_PID = 0xffff;
 const int MAX_STANDARD_PID = 0xff;
+const uint8_t UNKNOWN_RESPONSE = 0x3f;
 
 const int VEHICLE_INFO_SERVICE = 0x09;
 const int SHOW_DATA_SERVICE = 0x01;
@@ -132,6 +133,18 @@ const std::vector<uint8_t> receive_multipart(CANDevice &can)
     return decoder.get_data();
 }
 
+uint32_t read_features(const can_data &buffer)
+{
+    if ((buffer[1] & UNKNOWN_RESPONSE) == UNKNOWN_RESPONSE)
+    {
+        // Response id was unknown, therefore no features possible
+        return 0;
+    }
+
+    return (buffer[3] << 24 | buffer[4] << 16 | buffer[5] << 8 | buffer[6]);
+}
+
+
 void read_info(CANDevice &can, int ecu = ANY_ECU)
 {
     can_data buffer{};
@@ -167,9 +180,9 @@ void read_info(CANDevice &can, int ecu = ANY_ECU)
                     << ") :" << std::endl;
             }
 
-            const uint32_t features = buffer[3] << 24 | buffer[4] << 16 | buffer[5] << 8 | buffer[6];
+            const uint32_t features = read_features(buffer);
 
-            printf("    Available vehicle information: 0x%08x\n", features);
+            printf("    Available vehicle information (service=0x09): 0x%08x\n", features);
             std::cout << "    ";
             foreach_pid(features, [&](int pid) { printf("%02X,", pid); });
             std::cout << std::endl << std::endl;
@@ -215,9 +228,7 @@ void enumerate(CANDevice &can)
         {
             const int ecu_index = can_id - OBD_ECU_RECV_BASE;
             found = true;
-
-            const uint32_t features = buffer[3] << 24 | buffer[4] << 16 | buffer[5] << 8 | buffer[6];
-            ecu_features[ecu_index] = features;
+            ecu_features[ecu_index] = read_features(buffer);
         }
 
         return false;
@@ -269,7 +280,7 @@ void enumerate(CANDevice &can)
 
                     if (can.data_receive(can_id, buffer))
                     {
-                        features = buffer[3] << 24 | buffer[4] << 16 | buffer[5] << 8 | buffer[6];
+                        features = read_features(buffer);
 
                         return true;
                     }
@@ -285,7 +296,7 @@ void enumerate(CANDevice &can)
             }
 
 
-            printf("    Available data [%02X-%02X]: 0x%08x\n",
+            printf("    Available data (service=0x01) [%02X-%02X]: 0x%08x\n",
                     (offset + 1), // first feature
                     (offset + FEATURE_PAGE_SIZE), //last feature
                     features
@@ -351,7 +362,7 @@ void read_dtc(CANDevice &can, int ecu = ANY_ECU, fault_code_source service = sto
 
     const std::vector<uint8_t> defragmented = receive_multipart(can);
 
-    if (defragmented.empty() || (defragmented[0] & 0x3f) != service)
+    if (defragmented.empty() || (defragmented[0] & UNKNOWN_RESPONSE) != service)
     {
         // unknown service
         return;
@@ -411,19 +422,26 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
     }
 
     const std::vector<uint8_t> defragmented = receive_multipart(can);
-    if (defragmented.empty() || (defragmented[0] & 0x3f) != service)
+    if (defragmented.empty() || (defragmented[0] & UNKNOWN_RESPONSE) != service)
     {
         // unknown service
         return;
     }
+    
+    int i = ISO15765_DATA_OFFSET;
+    if (pid == 0x02)
+    {
+        // TODO: VIN begins with 0x01, unclear why
+        i++;
+    }
 
     std::cout << "Results (";
-    printf("Service: %02x, PID: %02x, length: %i)\n", service, pid, defragmented.size() - ISO15765_DATA_OFFSET);
+    printf("Service: %02x, PID: %02x, length: %i)\n", service, pid, defragmented.size() - i);
 
     //defragmented[0] = pid | 0x40;
     //defragmented[1] = service;
 
-    for (int i = ISO15765_DATA_OFFSET; i < defragmented.size(); i++)
+    for (; i < defragmented.size(); i++)
     {
         printf("%02x", defragmented[i]);
     }
@@ -431,44 +449,47 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
     std::cout << std::endl;
 }
 
+void print_help(const std::string &arg0)
+{
+    // print help
+    std::cout << "Raw SocketCAN OBD-II tool" << std::endl << std::endl;
+    std::cout << "USAGE: " << arg0 << " COMMAND [OPTIONS]" << std::endl;
+    std::cout << "\tCommands:" << std::endl;
+    std::cout << "\t\tenum - enumerate ECUs" << std::endl;
+    std::cout << "\t\tshow - show data for ECU (service=0x01)" << std::endl;
+    std::cout << "\t\trequest - read custom service/pid" << std::endl;
+    std::cout << "\t\tfaults - read fault codes (DTCs) (service=0x03)" << std::endl;
+    std::cout << "\t\tclear - clear fault codes (DTCs) (service=0x04)" << std::endl;
+    std::cout << "\t\tfrozen - show freeze frame data for ECU (service=0x02)" << std::endl;
+    std::cout << "\t\tpending - read pending fault codes (DTCs) (service=0x07)" << std::endl;
+    std::cout << "\t\tinfo - read info (service=0x09)" << std::endl;
+    std::cout << "\t\tpermanent - read permanent fault codes (DTCs) (service=0x0a)" << std::endl;
+    std::cout << std::endl;
+    std::cout << "\tOptions:" << std::endl;
+    std::cout << "\t\t-i <interface> - use this network interface" << std::endl;
+    std::cout << "\t\t-e <ecu> - only request from this ECU, 0-8. Do not broadcast (0x7df)" << std::endl;
+    std::cout << "\t\t-s <service> - service number, applies only to request command, hex number" << std::endl;
+    std::cout << "\t\t-p <pid> - pid number, applies only to request command, hex number" << std::endl;
+    std::cout << "\t\t-t <seconds> - wait for timeout before stopping packet receive, default=1s" << std::endl;
+}
+
 int main(int argc, const char* argv[])
 {
     if (argc == 1)
     {
-        // print help
-        std::cout << "Raw SocketCAN OBD-II tool" << std::endl << std::endl;
-        std::cout << "USAGE: " << argv[0] << " COMMAND [OPTIONS]" << std::endl;
-        std::cout << "\tCommands:" << std::endl;
-        std::cout << "\t\tenum - enumerate ECUs" << std::endl;
-        std::cout << "\t\tshow - show data for ECU (service=0x01)" << std::endl;
-        std::cout << "\t\trequest - read custom service/pid" << std::endl;
-        std::cout << "\t\tfaults - read fault codes (DTCs) (service=0x03)" << std::endl;
-        std::cout << "\t\tclear - clear fault codes (DTCs) (service=0x04)" << std::endl;
-        std::cout << "\t\tfrozen - show freeze frame data for ECU (service=0x02)" << std::endl;
-        std::cout << "\t\tpending - read pending fault codes (DTCs) (service=0x07)" << std::endl;
-        std::cout << "\t\tinfo - read info (service=0x09)" << std::endl;
-        std::cout << "\t\tpermanent - read permanent fault codes (DTCs) (service=0x0a)" << std::endl;
-        std::cout << std::endl;
-        std::cout << "\tOptions:" << std::endl;
-        std::cout << "\t\t-i <interface> - use this network interface" << std::endl;
-        std::cout << "\t\t-e <ecu> - only request from this ECU, 0-8. Do not broadcast (0x7df)" << std::endl;
-        std::cout << "\t\t-s <service> - service number, applies only to request command, hex number" << std::endl;
-        std::cout << "\t\t-p <pid> - pid number, applies only to request command, hex number" << std::endl;
-        std::cout << "\t\t-t <seconds> - wait for timeout before stopping packet receive, default=1s" << std::endl;
-
-        return 0;
+        print_help(argv[0]);
+        return 1;
     }
 
-    std::string cmd{argv[1]};
-    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+    std::string cmd = "help";
 
     std::string interface = "can0";
     int ecu = ANY_ECU;
     int service = -1;
     int pid = -1;
 
-    // Any further arguments
-    for (int i = 2; i < argc; i++)
+    // Arguments
+    for (int i = 1; i < argc; i++)
     {
         const std::string arg{argv[i]};
         if (arg == "-i")
@@ -496,6 +517,11 @@ int main(int argc, const char* argv[])
         {
             const int sec = std::stol(argv[++i]);
             wait_override = std::chrono::seconds(sec);
+        }
+        else
+        {
+            cmd = arg;
+            std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
         }
     }
 
@@ -545,6 +571,10 @@ int main(int argc, const char* argv[])
     else if (cmd == "request" || cmd == "read")
     {
         request(can, service, pid, ecu);
+    }
+    else if (cmd == "help")
+    {
+        print_help(argv[0]);
     }
     else
     {

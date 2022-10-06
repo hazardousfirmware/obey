@@ -129,12 +129,24 @@ int main(int argc, const char *argv[])
             }
             else
             {
-                // ecu 0
-                uint32_t bytes = (data[2] == 0x80) ? 0 : 0xebeb81bb;
-                bytes = htonl(bytes);
-                memcpy(&data[3], &bytes, sizeof(uint32_t));
-                data[0] = 0x01;
-                data[1] = 0x43;
+                if (data[2] < 0x80)
+                {
+                    uint32_t bytes = (data[2] == 0x80) ? 0 : 0xebeb81bb;
+                    bytes = htonl(bytes);
+                    memcpy(&data[3], &bytes, sizeof(uint32_t));
+                    data[0] = 0x01;
+                    data[1] = 0x43;
+                }
+                else
+                {
+                    // unknown repsonse, no more features
+                    data[1] = 0x7f;
+                    data[2] = 0xff;
+                    data[3] = 0xff;
+                    data[0] = 0x03;
+                }
+
+
                 memset(&frame, 0, sizeof(struct can_frame));
                 frame.can_id = id + 8;
                 frame.len = 8;
@@ -160,11 +172,18 @@ int main(int argc, const char *argv[])
                 id2 = id + 8;
             }
 
-            if(data[2] == 0x00 && data[3] == 0x02)
+            int vin = 0;
+
+            if(data[2] == 0x02)
             {
-                data[0] = 7;
-                data[1] = 0x49;
-                memset(&data[2], 'A', sizeof(data) - 2);
+                // request VIN
+                memset(data, 'A', sizeof(data));
+                data[0] = 0x10; //first part
+                data[1] = 0x14; //total len = 20
+                data[2] = 0x49; //reply to service 0x09
+                data[3] = 0x02; // reply to pid 0x02
+                data[4] = 0x01; // unknown, vehicles do this
+                vin = 1;
             }
             else
             {
@@ -188,6 +207,38 @@ int main(int argc, const char *argv[])
             }
 
             usleep(50000);
+            
+            if(vin)
+            {
+                char buf[100]; // recv the flow control
+                if (recv(sockfd, &buf, sizeof(frame), 0) < 0)
+                {
+                    perror("Receive");
+                    return 2;
+                }
+
+                // request VIN (continued)
+                memset(&data[0], 'A', sizeof(data));
+                data[0] = 0x21; //consec seq 1
+                memcpy(frame.data, data, sizeof(data));
+
+                if (send(sockfd, &frame, sizeof(struct can_frame), 0) < 0)
+                {
+                    perror("Send");
+                    return 2;
+                }
+
+                usleep(50000);
+                frame.data[0] = 0x22; // consec, seq 2
+
+                if (send(sockfd, &frame, sizeof(struct can_frame), 0) < 0)
+                {
+                    perror("Send");
+                    return 2;
+                }
+            }
+            
+            usleep(50000);
         }
         else if (data[1] == 0x03 || data[1] == 0x07 || data[1] == 0x0a)
         {
@@ -206,7 +257,7 @@ int main(int argc, const char *argv[])
             data[4] = 0x58; // U0158
 
             data[5] = 0xc1;
-            data[6] = 0x58; // U0158
+            data[6] = 0x57; // U0157
 
             data[7] = 0xc1;
 
@@ -221,13 +272,13 @@ int main(int argc, const char *argv[])
             usleep(50000);
             
             memset(data, 0x00, sizeof(data));
-            data[0] = 0x20; // consecutive
+            data[0] = 0x21; // consecutive
 
-            data[1] = 0x58; // U0158
+            data[1] = 0x56; // U0156
             data[2] = 0xc1; 
-            data[3] = 0x58; // U0158
+            data[3] = 0x55; // U0155
             data[4] = 0xc1; 
-            data[5] = 0x58; // U0158
+            data[5] = 0x54; // U0154
             
             memcpy(frame.data, data, sizeof(data));
 

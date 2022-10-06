@@ -7,7 +7,7 @@
 
 static const int MAX_LENGTH = 4095;
 enum header_type:uint8_t {single, first, consecutive, flow};
-static const int ISO15765_DATA_OFFSET = 2; //TODO: defragmented[2] = 0x01 is sometimes not present, determine why
+static const int ISO15765_DATA_OFFSET = 2;
 
 class ISO15765Decoder
 {
