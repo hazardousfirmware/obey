@@ -429,9 +429,9 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
     }
     
     int i = ISO15765_DATA_OFFSET;
-    if (pid == 0x02)
+    if (service == 0x09)
     {
-        // TODO: VIN begins with 0x01, unclear why
+        // Info request (service 0x09) appears to begins with 0x01, unclear why
         i++;
     }
 
