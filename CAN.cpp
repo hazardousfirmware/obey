@@ -98,7 +98,7 @@ bool CANDevice::data_receive(uint32_t &id, std::array<uint8_t, CAN_MAX_DLEN> &da
 
     id = frame.can_id;
 
-    data = {};
+    std::fill( data.begin(), data.end(), 0x00 );
 
     std::copy( frame.data, frame.data + frame.len, data.data() );
 
