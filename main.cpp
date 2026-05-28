@@ -44,7 +44,7 @@ void foreach_pid(uint32_t features, std::function<void(int)> callback)
 {
     for (int i = 0; i < 0x20; i++)
     {
-        if ((features >> (31 - i)) & 0x01 == 0x01)
+        if ( 0x01 == ( (features >> (31 - i)) & 0x01 ) )
         {
             callback(i + 1);
         }
@@ -305,7 +305,7 @@ void enumerate(CANDevice &can)
             foreach_pid(features, [&](int pid) { printf("%02X,", pid + offset); });
             std::cout << std::endl << std::endl;
 
-            if (features & 0x01 == 0)
+            if (! ( features & 0x01 ) )
             {
                 // No more extra pages
                 break;
@@ -370,9 +370,10 @@ void read_dtc(CANDevice &can, int ecu = ANY_ECU, fault_code_source service = sto
 
     std::cout << "Diagnostic trouble codes:" << std::endl;
 
-    for (int i = 1; i < (int)defragmented.size() -1; i++)
+    for (int i = 1; i < static_cast<int>( defragmented.size() -1 ); i++)
     {
-        const uint16_t dtc = defragmented[i] << 8 | defragmented[++i];
+        uint16_t dtc = static_cast<uint16_t>(defragmented[i]) << 8;
+        dtc |= defragmented[++i];
         std::cout << decode_dtc(dtc) << std::endl;
     }
 }
@@ -435,13 +436,12 @@ void request(CANDevice &can, int service, int pid, int ecu = ANY_ECU)
         i++;
     }
 
-    std::cout << "Results (";
-    printf("Service: %02x, PID: %02x, length: %i)\n", service, pid, defragmented.size() - i);
+    printf("Results (Service: %02x, PID: %02x, length: %i)\n", service, pid, static_cast<int>( defragmented.size() - i ) );
 
     //defragmented[0] = pid | 0x40;
     //defragmented[1] = service;
 
-    for (; i < defragmented.size(); i++)
+    for (; i < static_cast<int>( defragmented.size() ); i++)
     {
         printf("%02x", defragmented[i]);
     }

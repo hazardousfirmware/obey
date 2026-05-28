@@ -1,17 +1,11 @@
 #include "ISO15765.hpp"
 #include <iostream>
 
-ISO15765Decoder::ISO15765Decoder() : length(0), index(0), last(0)
-{
-    std::fill(defragmented.begin(), defragmented.end(), 0x00);
-}
-
-
 bool ISO15765Decoder::add_fragment(const std::array<uint8_t, 8> &data)
 {
     // returns true when final piece received
 
-    const header_type type = (header_type)(data[0] >> 4);
+    const header_type type = static_cast<header_type>(data[0] >> 4);
 
     if (type == header_type::single)
     {

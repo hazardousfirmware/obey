@@ -12,17 +12,17 @@ static const int ISO15765_DATA_OFFSET = 2;
 class ISO15765Decoder
 {
     public:
-        ISO15765Decoder();
+        ISO15765Decoder() = default;
         ~ISO15765Decoder() = default;
 
         bool add_fragment(const std::array<uint8_t, 8> &data);
         const std::vector<uint8_t> get_data() const;
 
     private:
-        std::array<uint8_t, MAX_LENGTH> defragmented;
-        int length; // expected total length
-        int index; // offset in buffer
-        int last; // Last sequence
+        std::array<uint8_t, MAX_LENGTH> defragmented{};
+        int length{}; // expected total length
+        int index{}; // offset in buffer
+        int last{}; // Last sequence
 };
 
 #endif //__ISO15765_H

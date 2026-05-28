@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdint>
 #include <array>
+#include <linux/can.h>
 
 class CANDevice
 {
@@ -11,8 +12,8 @@ class CANDevice
         CANDevice(std::string interface);
         ~CANDevice();
 
-        void data_send(uint32_t id, const std::array<uint8_t, 8> &data);
-        bool data_receive(uint32_t &id, std::array<uint8_t, 8> &data);
+        void data_send(uint32_t id, const std::array<uint8_t, CAN_MAX_DLEN> &data);
+        bool data_receive(uint32_t &id, std::array<uint8_t, CAN_MAX_DLEN> &data);
 
         void filter(uint32_t id, uint32_t mask = 0x7FF);
         void nofilter();
